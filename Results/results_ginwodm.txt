@@ -1,0 +1,100 @@
+Epoch 0: Train Loss = 21.7305, Gen Loss = 0.6592, Recall = 0.1474, NDCG = 0.0582
+Epoch 1: Train Loss = 19.8294, Gen Loss = 0.3616
+Epoch 2: Train Loss = 18.8730, Gen Loss = 0.2389
+Epoch 3: Train Loss = 18.2052, Gen Loss = 0.1690
+Epoch 4: Train Loss = 17.5972, Gen Loss = 0.1232
+Epoch 5: Train Loss = 17.0121, Gen Loss = 0.0917
+Epoch 6: Train Loss = 16.5760, Gen Loss = 0.0693
+Epoch 7: Train Loss = 16.3014, Gen Loss = 0.0532
+Epoch 8: Train Loss = 15.9126, Gen Loss = 0.0414
+Epoch 9: Train Loss = 15.6599, Gen Loss = 0.0326
+Epoch 10: Train Loss = 15.3740, Gen Loss = 0.0260, Recall = 0.0778, NDCG = 0.0322
+Epoch 11: Train Loss = 15.1224, Gen Loss = 0.0209
+Epoch 12: Train Loss = 14.9629, Gen Loss = 0.0170
+Epoch 13: Train Loss = 14.7508, Gen Loss = 0.0140
+Epoch 14: Train Loss = 14.5995, Gen Loss = 0.0116
+Epoch 15: Train Loss = 14.4582, Gen Loss = 0.0097
+Epoch 16: Train Loss = 14.2841, Gen Loss = 0.0082
+Epoch 17: Train Loss = 14.1490, Gen Loss = 0.0070
+Epoch 18: Train Loss = 14.0503, Gen Loss = 0.0060
+Epoch 19: Train Loss = 13.9529, Gen Loss = 0.0051
+Epoch 20: Train Loss = 13.8180, Gen Loss = 0.0044, Recall = 0.0806, NDCG = 0.0330
+Epoch 21: Train Loss = 13.7181, Gen Loss = 0.0039
+Epoch 22: Train Loss = 13.6433, Gen Loss = 0.0034
+Epoch 23: Train Loss = 13.5568, Gen Loss = 0.0030
+Epoch 24: Train Loss = 13.4819, Gen Loss = 0.0027
+Epoch 25: Train Loss = 13.4210, Gen Loss = 0.0024
+Epoch 26: Train Loss = 13.3591, Gen Loss = 0.0021
+Epoch 27: Train Loss = 13.3041, Gen Loss = 0.0019
+Epoch 28: Train Loss = 13.2407, Gen Loss = 0.0017
+Epoch 29: Train Loss = 13.1821, Gen Loss = 0.0016
+Epoch 30: Train Loss = 13.1330, Gen Loss = 0.0014, Recall = 0.0997, NDCG = 0.0385
+Epoch 31: Train Loss = 13.0820, Gen Loss = 0.0013
+Epoch 32: Train Loss = 13.0395, Gen Loss = 0.0012
+Epoch 33: Train Loss = 12.9920, Gen Loss = 0.0011
+Epoch 34: Train Loss = 12.9472, Gen Loss = 0.0010
+Epoch 35: Train Loss = 12.9049, Gen Loss = 0.0010
+Epoch 36: Train Loss = 12.8643, Gen Loss = 0.0009
+Epoch 37: Train Loss = 12.8265, Gen Loss = 0.0008
+Epoch 38: Train Loss = 12.7872, Gen Loss = 0.0008
+Epoch 39: Train Loss = 12.7486, Gen Loss = 0.0007
+Epoch 40: Train Loss = 12.7115, Gen Loss = 0.0007, Recall = 0.0913, NDCG = 0.0376
+Epoch 41: Train Loss = 12.6744, Gen Loss = 0.0006
+Epoch 42: Train Loss = 12.6392, Gen Loss = 0.0006
+Epoch 43: Train Loss = 12.6026, Gen Loss = 0.0006
+Epoch 44: Train Loss = 12.5670, Gen Loss = 0.0005
+Epoch 45: Train Loss = 12.5339, Gen Loss = 0.0005
+Epoch 46: Train Loss = 12.4976, Gen Loss = 0.0005
+Epoch 47: Train Loss = 12.4636, Gen Loss = 0.0005
+Epoch 48: Train Loss = 12.4292, Gen Loss = 0.0004
+Epoch 49: Train Loss = 12.3945, Gen Loss = 0.0004
+Epoch 50: Train Loss = 12.3605, Gen Loss = 0.0004, Recall = 0.1032, NDCG = 0.0404
+Epoch 51: Train Loss = 12.3267, Gen Loss = 0.0004
+Epoch 52: Train Loss = 12.2929, Gen Loss = 0.0004
+Epoch 53: Train Loss = 12.2594, Gen Loss = 0.0003
+Epoch 54: Train Loss = 12.2259, Gen Loss = 0.0003
+Epoch 55: Train Loss = 12.1926, Gen Loss = 0.0003
+Epoch 56: Train Loss = 12.1596, Gen Loss = 0.0003
+Epoch 57: Train Loss = 12.1266, Gen Loss = 0.0003
+Epoch 58: Train Loss = 12.0938, Gen Loss = 0.0003
+Epoch 59: Train Loss = 12.0610, Gen Loss = 0.0003
+Epoch 60: Train Loss = 12.0283, Gen Loss = 0.0003, Recall = 0.0971, NDCG = 0.0393
+Epoch 61: Train Loss = 11.9954, Gen Loss = 0.0003
+Epoch 62: Train Loss = 11.9627, Gen Loss = 0.0002
+Epoch 63: Train Loss = 11.9302, Gen Loss = 0.0002
+Epoch 64: Train Loss = 11.8977, Gen Loss = 0.0002
+Epoch 65: Train Loss = 11.8653, Gen Loss = 0.0002
+Epoch 66: Train Loss = 11.8331, Gen Loss = 0.0002
+Epoch 67: Train Loss = 11.8010, Gen Loss = 0.0002
+Epoch 68: Train Loss = 11.7691, Gen Loss = 0.0002
+Epoch 69: Train Loss = 11.7370, Gen Loss = 0.0002
+Epoch 70: Train Loss = 11.7052, Gen Loss = 0.0002, Recall = 0.0971, NDCG = 0.0396
+Epoch 71: Train Loss = 11.6730, Gen Loss = 0.0002
+Epoch 72: Train Loss = 11.6413, Gen Loss = 0.0002
+Epoch 73: Train Loss = 11.6094, Gen Loss = 0.0002
+Epoch 74: Train Loss = 11.5778, Gen Loss = 0.0002
+Epoch 75: Train Loss = 11.5461, Gen Loss = 0.0002
+Epoch 76: Train Loss = 11.5146, Gen Loss = 0.0002
+Epoch 77: Train Loss = 11.4830, Gen Loss = 0.0001
+Epoch 78: Train Loss = 11.4516, Gen Loss = 0.0001
+Epoch 79: Train Loss = 11.4204, Gen Loss = 0.0001
+Epoch 80: Train Loss = 11.3890, Gen Loss = 0.0001, Recall = 0.1032, NDCG = 0.0412
+Epoch 81: Train Loss = 11.3577, Gen Loss = 0.0001
+Epoch 82: Train Loss = 11.3265, Gen Loss = 0.0001
+Epoch 83: Train Loss = 11.2953, Gen Loss = 0.0001
+Epoch 84: Train Loss = 11.2642, Gen Loss = 0.0001
+Epoch 85: Train Loss = 11.2333, Gen Loss = 0.0001
+Epoch 86: Train Loss = 11.2023, Gen Loss = 0.0001
+Epoch 87: Train Loss = 11.1715, Gen Loss = 0.0001
+Epoch 88: Train Loss = 11.1404, Gen Loss = 0.0001
+Epoch 89: Train Loss = 11.1097, Gen Loss = 0.0001
+Epoch 90: Train Loss = 11.0789, Gen Loss = 0.0001, Recall = 0.1039, NDCG = 0.0420
+Epoch 91: Train Loss = 11.0482, Gen Loss = 0.0001
+Epoch 92: Train Loss = 11.0175, Gen Loss = 0.0001
+Epoch 93: Train Loss = 10.9869, Gen Loss = 0.0001
+Epoch 94: Train Loss = 10.9564, Gen Loss = 0.0001
+Epoch 95: Train Loss = 10.9259, Gen Loss = 0.0001
+Epoch 96: Train Loss = 10.8954, Gen Loss = 0.0001
+Epoch 97: Train Loss = 10.8650, Gen Loss = 0.0001
+Epoch 98: Train Loss = 10.8348, Gen Loss = 0.0001
+Epoch 99: Train Loss = 10.8044, Gen Loss = 0.0001
