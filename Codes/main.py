@@ -25,11 +25,11 @@ def ParseArgs():
     parser.add_argument("--gnn_layers", default=2, type=int, help="Number of GNN layers")
     parser.add_argument("--topk", default=20, type=int, help="Top K items for evaluation")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
-    parser.add_argument("--gnn_type", default="GAT", type=str, choices=["GCN", "GAT", "GIN"], help="Type of GNN")
-    parser.add_argument("--variant", default="standard", type=str, choices=["standard", "w/o CL", "w/o DM", "w/o CKGC"], help="Ablation Variant")
+    parser.add_argument("--gnn_type", default="GCN", type=str, choices=["GCN", "GAT", "GIN"], help="Type of GNN")
+    parser.add_argument("--variant", default="standard", type=str, choices=["standard", "w/o DM", "w/o CKGC"], help="Ablation Variant")
     parser.add_argument("--output_dir", default="results", type=str, help="Directory to save results")
     parser.add_argument("--temperature", type=float, default=0.1, help="Temperature for contrastive loss")
-    parser.add_argument("--inf_steps", type=int, default=25, help="Number of diffusion inference steps")
+    parser.add_argument("--inf_steps", type=int, default=50, help="Number of diffusion inference steps")
     return parser.parse_args()
 
 args = ParseArgs()
@@ -43,7 +43,6 @@ if args.device.type == 'cuda':
 os.makedirs(args.output_dir, exist_ok=True)
 
 class KGDataset(Dataset):
-    """Dataset for Knowledge Graph triplets."""
     def __init__(self, kg_tensor):
         self.kg_tensor = kg_tensor
 
@@ -89,22 +88,15 @@ class DataHandler:
         self.trnLoader = DataLoader(TrnData(trnMat), batch_size=args.batch, shuffle=True, num_workers=0)
         self.tstLoader = DataLoader(TstData(tstMat, trnMat), batch_size=args.batch, shuffle=False, num_workers=0)
 
-        # Knowledge Graph
         kg_df = pd.read_csv(self.kg_file)
-
-        # Convert entities and relations to IDs
         entities = pd.concat([kg_df['entity1'], kg_df['entity2']]).unique()
         self.num_entities = len(entities)
         self.entity2id = {entity: idx for idx, entity in enumerate(entities)}
         kg_df['head'] = kg_df['entity1'].map(self.entity2id).astype(int)
         kg_df['tail'] = kg_df['entity2'].map(self.entity2id).astype(int)
-
-        # Ensure relations are mapped to integers
         relation_set = kg_df['relation'].unique()
         relation_mapping = {rel: idx for idx, rel in enumerate(relation_set)}
         kg_df['relation'] = kg_df['relation'].map(relation_mapping).astype(int)
-
-        # Create kg_triplets as a numpy array
         self.kg_triplets = kg_df[['head', 'relation', 'tail']].values
 
 
@@ -133,158 +125,16 @@ class DataHandler:
         zero_users = sp.coo_matrix((num_users, num_users))
         zero_items = sp.coo_matrix((num_items, num_items))
         adj_matrix = sp.bmat([[zero_users, interaction_matrix], [interaction_matrix.T, zero_items]])
-
-        # Convert the adjacency matrix to COO format
         adj_matrix = adj_matrix.tocoo()
-
-        # Add self-loops
         identity = sp.identity(adj_matrix.shape[0], format='coo')
         adj_matrix = adj_matrix + identity
-
-        # Convert adj_matrix to COO format again after addition
         adj_matrix = adj_matrix.tocoo()
-
-        # Extract indices and values for PyTorch sparse tensor
         indices = np.vstack((adj_matrix.row, adj_matrix.col))
         indices = torch.tensor(indices, dtype=torch.long)
         values = torch.tensor(adj_matrix.data, dtype=torch.float32)
         shape = (num_users + num_items, num_users + num_items)
 
         return torch.sparse_coo_tensor(indices, values, shape).to(args.device)
-
-
-
-
-
-# -------------------------
-# GNN Layers
-# -------------------------
-
-class GCNLayer(nn.Module):
-    def __init__(self, in_dim, out_dim):
-        super(GCNLayer, self).__init__()
-        self.linear = nn.Linear(in_dim, out_dim)
-        self.activation = nn.ReLU()
-
-    def forward(self, adj, features):
-        # Add self-loops to adjacency matrix
-        adj = adj + torch.eye(adj.shape[0], device=adj.device)
-
-        # Normalized adjacency matrix: D^(-0.5) * A * D^(-0.5)
-        row_sum = torch.sum(adj, dim=1)
-        d_inv_sqrt = torch.pow(row_sum, -0.5)
-        d_inv_sqrt[torch.isinf(d_inv_sqrt)] = 0.0  # Handle division by zero
-        d_mat_inv_sqrt = torch.diag(d_inv_sqrt)
-        norm_adj = torch.mm(torch.mm(d_mat_inv_sqrt, adj), d_mat_inv_sqrt)
-
-        # GCN propagation rule: H' = ReLU(A_norm H W)
-        output = torch.mm(norm_adj, features)
-        output = self.linear(output)
-        return self.activation(output)
-
-
-
-class GATLayer(nn.Module):
-    def __init__(self, in_dim, out_dim, heads=1, dropout=0.1):
-        super(GATLayer, self).__init__()
-        self.heads = heads
-        self.out_dim = out_dim
-        self.attention_heads = nn.ModuleList([
-            nn.Linear(2 * in_dim, 1) for _ in range(heads)
-        ])
-        self.linear = nn.Linear(in_dim, out_dim * heads)
-        self.dropout = nn.Dropout(dropout)
-        self.activation = nn.ELU()
-
-    def forward(self, adj, features):
-        # Add sparse self-loops
-        identity = torch.sparse_coo_tensor(
-            indices=torch.stack([torch.arange(adj.shape[0], device=adj.device),
-                                 torch.arange(adj.shape[0], device=adj.device)]),
-            values=torch.ones(adj.shape[0], device=adj.device),
-            size=(adj.shape[0], adj.shape[0]),
-            device=adj.device
-        )
-        adj = adj + identity
-
-        # Convert sparse adjacency matrix to dense for compatibility
-        adj_dense = adj.to_dense()
-
-        # Attention mechanism
-        N = features.shape[0]
-        attention_scores = []
-        for head in self.attention_heads:
-            expanded_features = features.unsqueeze(1).repeat(1, N, 1)
-            concatenated_features = torch.cat(
-                [expanded_features, features.unsqueeze(0).repeat(N, 1, 1)],
-                dim=-1
-            )
-            attention_score = torch.exp(head(concatenated_features).squeeze(-1))
-            attention_scores.append(attention_score)
-        attention_scores = torch.stack(attention_scores, dim=1)
-
-        # Apply adjacency mask
-        attention_scores = attention_scores * adj_dense.unsqueeze(1)
-
-        # Normalize scores
-        attention_scores = attention_scores / (
-            attention_scores.sum(dim=-1, keepdim=True) + 1e-10
-        )
-        attention_scores = self.dropout(attention_scores)
-
-        # Weighted aggregation
-        feature_transformed = self.linear(features)
-        feature_transformed = feature_transformed.view(N, self.heads, self.out_dim)
-       # Weighted aggregation
-        attention_output = torch.einsum("nhi,nij->nhj", attention_scores, feature_transformed)
-
-
-        # Combine heads and return
-        return self.activation(attention_output.view(N, -1))
-
-
-
-
-class GINLayer(nn.Module):
-    def __init__(self, in_dim, out_dim, epsilon=0.1):
-        super(GINLayer, self).__init__()
-        self.epsilon = nn.Parameter(torch.tensor(epsilon))
-        self.mlp = nn.Sequential(
-            nn.Linear(in_dim, out_dim),
-            nn.ReLU(),
-            nn.Linear(out_dim, out_dim),
-            nn.BatchNorm1d(out_dim)
-        )
-
-    def forward(self, adj, features):
-        # Add self-loops to adjacency matrix
-        adj = adj + torch.eye(adj.shape[0], device=adj.device)
-
-        # Neighbor aggregation
-        row_sum = torch.sum(adj, dim=1)
-        d_inv = torch.pow(row_sum, -1)
-        d_inv[torch.isinf(d_inv)] = 0.0  # Handle division by zero
-        d_mat_inv = torch.diag(d_inv)
-        agg_neighbors = torch.mm(d_mat_inv, torch.mm(adj, features))
-
-        # Apply the GIN formula
-        out = (1 + self.epsilon) * features + agg_neighbors
-        return self.mlp(out)
-
-# -------------------------
-# Updated Layer Getter
-# -------------------------
-
-def get_gnn_layer(gnn_type, in_dim, out_dim, heads=1):
-    if gnn_type == "GCN":
-        return GCNLayer(in_dim, out_dim)
-    elif gnn_type == "GAT":
-        return GATLayer(in_dim, out_dim, heads=heads)
-    elif gnn_type == "GIN":
-        return GINLayer(in_dim, out_dim)
-    else:
-        raise ValueError(f"Unsupported GNN type: {gnn_type}")
-
 
 
 
@@ -302,12 +152,10 @@ class GenerativeModel(nn.Module):
         else:
             self.model = GaussianDiffusionModel(handler.num_entities, args.latdim, args.inf_steps)
         
-        # Embedding for KG entities and relations
         self.entity_embedding = nn.Embedding(handler.num_entities, args.latdim)
         self.relation_embedding = nn.Embedding(len(handler.kg_triplets), args.latdim)
 
     def forward(self, x):
-        # Convert KG triplets to embeddings
         head_embeds = self.entity_embedding(x[:, 0].long())
         rel_embeds = self.relation_embedding(x[:, 1].long())
         tail_embeds = self.entity_embedding(x[:, 2].long())
@@ -319,14 +167,14 @@ class VariationalGraphAutoencoder(nn.Module):
     def __init__(self, num_entities, latdim):
         super(VariationalGraphAutoencoder, self).__init__()
         self.encoder = nn.Sequential(
-            nn.Linear(latdim * 3, latdim),   #was nn.Linear(latdim, latdim),
+            nn.Linear(latdim * 3, latdim),  
             nn.ReLU(),
             nn.Linear(latdim, latdim)
         )
         self.decoder = nn.Sequential(
-            nn.Linear(latdim, latdim * 3),  #was nn.Linear(latdim, latdim),
+            nn.Linear(latdim, latdim * 3), 
             nn.ReLU(),
-            nn.Linear(latdim * 3, latdim * 3), #was nn.Linear(latdim, latdim),
+            nn.Linear(latdim * 3, latdim * 3), 
             nn.Sigmoid()
         )
 
@@ -374,18 +222,13 @@ class DiffKG(nn.Module):
         self.num_items = handler.num_items
         self.num_entities = handler.num_entities
         self.latdim = args.latdim
-
-        # Embeddings for users, items, and entities
         self.uEmbeds = nn.Parameter(torch.randn(self.num_users, self.latdim).to(args.device))
         self.iEmbeds = nn.Parameter(torch.randn(self.num_items, self.latdim).to(args.device))
         self.eEmbeds = nn.Parameter(torch.randn(self.num_entities, self.latdim).to(args.device))
-
-        # Initialize GNN layers
         self.gnnLayers = nn.ModuleList(
             [get_gnn_layer(args.gnn_type, self.latdim, self.latdim) for _ in range(args.gnn_layers)]
         )
 
-        # CKGC-specific components
         if args.variant != "w/o CKGC":
             self.kg_loss_weight = 1.0
             self.rel_embeds = nn.Embedding(len(handler.kg_triplets), self.latdim).to(args.device)
@@ -393,14 +236,11 @@ class DiffKG(nn.Module):
             self.kg_loss_weight = 0.0
 
     def forward(self, adj):
-        # Combine user and item embeddings
         embeds = torch.cat([self.uEmbeds, self.iEmbeds], dim=0)
         
-        # Pass through GNN layers
         for layer in self.gnnLayers:
             embeds = layer(adj, embeds)
         
-        # Split embeddings back into user and item parts
         userEmbeds = embeds[:self.num_users]
         itemEmbeds = embeds[self.num_users:]
         return userEmbeds, itemEmbeds
@@ -409,60 +249,18 @@ class DiffKG(nn.Module):
         if args.variant == "w/o CKGC":
             return 0.0
         
-        # Extract head, relation, and tail indices
         heads = torch.tensor(kg_triplets[:, 0], dtype=torch.long).to(args.device)
         relations = torch.tensor(kg_triplets[:, 1], dtype=torch.long).to(args.device)
         tails = torch.tensor(kg_triplets[:, 2], dtype=torch.long).to(args.device)
         
-        # Get embeddings for heads, relations, and tails
         head_embeds = self.eEmbeds[heads]
         tail_embeds = self.eEmbeds[tails]
         rel_embeds = self.rel_embeds(relations)
-        
-        # Calculate the score using the translational distance
         scores = torch.norm(head_embeds + rel_embeds - tail_embeds, p=2, dim=1)
-        
-        # Compute mean loss for KG triplets
         kg_loss = torch.mean(scores)
         return kg_loss
 
 
-
-class GaussianDiffusionModel(nn.Module):
-    def __init__(self, num_entities, latdim, num_steps=50):
-        super(GaussianDiffusionModel, self).__init__()
-        self.num_steps = num_steps
-        self.encoder = nn.Linear(3, latdim)  # Updated to match input feature size
-        self.decoder = nn.Linear(latdim, 3)  # Output matches x_t
-
-        #self.decoder = nn.Linear(latdim, latdim)
-        self.beta_schedule = torch.linspace(0.0001, 0.02, steps=num_steps).to(args.device)
-
-    def forward_diffusion(self, x, t):
-        noise = torch.randn_like(x)
-        alpha_t = torch.prod(1 - self.beta_schedule[:t + 1])  # Scalar
-        noisy_x = torch.sqrt(alpha_t) * x + torch.sqrt(1 - alpha_t) * noise
-        return noisy_x
-
-    def reverse_diffusion(self, x_t, t):
-        latent = F.relu(self.encoder(x_t))
-        denoised = self.decoder(latent)
-        beta_t = self.beta_schedule[t]
-        mean = (1 / torch.sqrt(1 - beta_t)) * (x_t - beta_t / torch.sqrt(1 - beta_t) * denoised)
-        return mean
-
-    def fforward(self, x):
-        for t in range(self.num_steps):
-            x = self.forward_diffusion(x, t)
-        for t in reversed(range(self.num_steps)):
-            x = self.reverse_diffusion(x, t)
-        return x
-    def forward(self, x):
-        for t in range(self.num_steps):
-            x = self.forward_diffusion(x, t)
-        for t in reversed(range(self.num_steps)):
-            x = self.reverse_diffusion(x, t)
-        return torch.sigmoid(x)  # Ensure output is in [0, 1]
 
 
 class Coach:
@@ -477,7 +275,6 @@ class Coach:
         self.criterion = nn.BCELoss()
 
     def train_epoch(self):
-        """Train the DiffKG model for one epoch."""
         self.model.train()
         total_loss = 0
 
@@ -487,20 +284,14 @@ class Coach:
             neg_item = neg_item.to(args.device).long()
 
             self.opt.zero_grad()
-
-            # Forward pass through the model
             userEmbeds, itemEmbeds = self.model(self.handler.torchBiAdj)
             pos_scores = (userEmbeds[user] * itemEmbeds[pos_item]).sum(dim=1)
             neg_scores = (userEmbeds[user] * itemEmbeds[neg_item]).sum(dim=1)
 
-            # Calculate BPR loss
             loss = -F.logsigmoid(pos_scores - neg_scores).mean()
 
-            # Add Knowledge Graph (KG) loss
             kg_loss = self.model.compute_kg_loss(self.handler.kg_triplets)
             loss += kg_loss * self.model.kg_loss_weight
-
-            # Backpropagation
             loss.backward()
             self.opt.step()
 
@@ -508,6 +299,8 @@ class Coach:
 
         avg_loss = total_loss / len(self.handler.trnLoader)
         return avg_loss
+    
+
     def train_generative_model(self):
         self.generative_model.train()
         total_loss = 0
@@ -523,17 +316,12 @@ class Coach:
             self.gen_opt.zero_grad()
 
             recon = self.generative_model(data)
-            # Since we're dealing with embeddings, use MSELoss
-            #loss = nn.MSELoss()(recon, data.float())
-            # Generate embeddings for the target data
+
             head_embeds = self.generative_model.entity_embedding(data[:, 0].long())
             rel_embeds = self.generative_model.relation_embedding(data[:, 1].long())
             tail_embeds = self.generative_model.entity_embedding(data[:, 2].long())
 
-            # Concatenate embeddings to match the model output size
             target = torch.cat([head_embeds, rel_embeds, tail_embeds], dim=1)
-
-            # Compute MSELoss with the aligned target
             loss = nn.MSELoss()(recon, target)
 
             loss.backward()
@@ -548,27 +336,21 @@ class Coach:
 
 
     def test_epoch(self):
-        """Evaluate the model on the test set."""
         self.model.eval()
         total_recall, total_ndcg = 0, 0
         num_users = len(self.handler.tstLoader.dataset)
 
         with torch.no_grad():
-            # Get user and item embeddings
+
             userEmbeds, itemEmbeds = self.model(self.handler.torchBiAdj)
 
             for user, trnMask in self.handler.tstLoader:
                 user = user.long().to(args.device)
                 trnMask = trnMask.to(args.device)
-
-                # Compute scores and mask seen items
                 scores = torch.matmul(userEmbeds[user], itemEmbeds.t())
                 scores = scores * (1 - trnMask) - trnMask * 1e8
-
-                # Get top-k recommendations
                 _, topk_indices = torch.topk(scores, args.topk)
 
-                # Compute recall and NDCG
                 recall, ndcg = self.calculate_metrics(
                     topk_indices.cpu().numpy(), 
                     self.handler.tstLoader.dataset.tstLocs, 
@@ -582,7 +364,6 @@ class Coach:
         return avg_recall, avg_ndcg
 
     def calculate_metrics(self, topk_indices, tstLocs, users):
-        """Calculate recall and NDCG for a batch."""
         total_recall, total_ndcg = 0, 0
         for idx, user in enumerate(users):
             pred_items = list(topk_indices[idx])
@@ -591,11 +372,8 @@ class Coach:
             if len(true_items) == 0:
                 continue
 
-            # Compute recall
             hit_items = set(pred_items) & set(true_items)
             recall = len(hit_items) / len(true_items)
-
-            # Compute NDCG
             dcg = sum([1.0 / math.log2(i + 2) for i, item in enumerate(pred_items) if item in true_items])
             idcg = sum([1.0 / math.log2(i + 2) for i in range(min(len(true_items), args.topk))])
             ndcg = dcg / idcg if idcg > 0 else 0.0
@@ -606,20 +384,14 @@ class Coach:
         return total_recall, total_ndcg
 
     def run(self):
-        """Run the training and evaluation process."""
         recalls = []
         ndcgs = []
         epochs = []
 
-        with open(os.path.join(args.output_dir, "results_gat_25.txt"), "w") as f:
+        with open(os.path.join(args.output_dir, "results.txt"), "w") as f:
             for epoch in range(args.epoch):
-                # Train the main model
                 train_loss = self.train_epoch()
-
-                # Train the generative model
                 gen_loss = self.train_generative_model()
-
-                # Test and log results at intervals
                 if epoch % args.tstEpoch == 0:
                     recall, ndcg = self.test_epoch()
                     print(f"Epoch {epoch}: Train Loss = {train_loss:.4f}, Gen Loss = {gen_loss:.4f}, Recall = {recall:.4f}, NDCG = {ndcg:.4f}")
@@ -631,7 +403,6 @@ class Coach:
                     print(f"Epoch {epoch}: Train Loss = {train_loss:.4f}, Gen Loss = {gen_loss:.4f}")
                     f.write(f"Epoch {epoch}: Train Loss = {train_loss:.4f}, Gen Loss = {gen_loss:.4f}\n")
 
-            # Plot training performance
             plt.figure()
             plt.plot(epochs, recalls, label='Recall@20')
             plt.plot(epochs, ndcgs, label='NDCG@20')
@@ -639,13 +410,12 @@ class Coach:
             plt.ylabel('Performance')
             plt.legend()
             plt.title('Model Performance over Epochs')
-            plt.savefig(os.path.join(args.output_dir, 'performance_gat_25.png'))
+            plt.savefig(os.path.join(args.output_dir, 'performance.png'))
             plt.close()
 
 
 class TstData(Dataset):
     def __init__(self, coomat, trnMat):
-        # Convert training matrix to CSR format for efficient access
         self.csrmat = (trnMat.tocsr() != 0) * 1.0
         tstLocs = [list() for _ in range(coomat.shape[0])]
         tstUsrs = set()
@@ -654,45 +424,19 @@ class TstData(Dataset):
             col = coomat.col[i]
             tstLocs[row].append(col)
             tstUsrs.add(row)
-        self.tstUsrs = np.array(list(tstUsrs))  # Array of test user indices
-        self.tstLocs = tstLocs  # List of true test item indices per user
-
+        self.tstUsrs = np.array(list(tstUsrs)) 
+        self.tstLocs = tstLocs
     def __len__(self):
         return len(self.tstUsrs)
 
     def __getitem__(self, idx):
-        # Retrieve test user and mask of training items for this user
         user = self.tstUsrs[idx]
-        trnMask = np.reshape(self.csrmat[user].toarray(), [-1])  # Training item mask
+        trnMask = np.reshape(self.csrmat[user].toarray(), [-1]) 
         return user, torch.FloatTensor(trnMask)
 
 
 
 
-class GCNLayer(nn.Module):
-    def __init__(self, in_dim, out_dim):
-        super(GCNLayer, self).__init__()
-        self.linear = nn.Linear(in_dim, out_dim)
-        self.activation = nn.ReLU()
-
-    def forward(self, adj, features):
-        # Convert sparse adjacency to dense
-        adj = adj.to_dense()
-
-        # Add self-loops to adjacency matrix
-        adj = adj + torch.eye(adj.shape[0], device=adj.device)
-
-        # Normalized adjacency matrix: D^(-0.5) * A * D^(-0.5)
-        row_sum = torch.sum(adj, dim=1)
-        d_inv_sqrt = torch.pow(row_sum, -0.5)
-        d_inv_sqrt[torch.isinf(d_inv_sqrt)] = 0.0  # Handle division by zero
-        d_mat_inv_sqrt = torch.diag(d_inv_sqrt)
-        norm_adj = torch.mm(torch.mm(d_mat_inv_sqrt, adj), d_mat_inv_sqrt)
-
-        # GCN propagation rule: H' = ReLU(A_norm H W)
-        output = torch.mm(norm_adj, features)
-        output = self.linear(output)
-        return self.activation(output)
 
 
 class GCNLayer(nn.Module):
@@ -702,7 +446,6 @@ class GCNLayer(nn.Module):
         self.activation = nn.ReLU()
 
     def forward(self, adj, features):
-        # Create a sparse identity matrix
         identity = torch.sparse_coo_tensor(
             indices=torch.arange(adj.shape[0]).repeat(2, 1),
             values=torch.ones(adj.shape[0], device=adj.device),
@@ -710,23 +453,18 @@ class GCNLayer(nn.Module):
             device=adj.device
         )
 
-        # Add sparse self-loops to adjacency matrix
         adj = adj + identity
-
-        # Convert sparse to dense for further processing
         adj = adj.to_dense()
-
-        # Normalized adjacency matrix: D^(-0.5) * A * D^(-0.5)
         row_sum = torch.sum(adj, dim=1)
         d_inv_sqrt = torch.pow(row_sum, -0.5)
-        d_inv_sqrt[torch.isinf(d_inv_sqrt)] = 0.0  # Handle division by zero
+        d_inv_sqrt[torch.isinf(d_inv_sqrt)] = 0.0  
         d_mat_inv_sqrt = torch.diag(d_inv_sqrt)
         norm_adj = torch.mm(torch.mm(d_mat_inv_sqrt, adj), d_mat_inv_sqrt)
 
-        # GCN propagation rule: H' = ReLU(A_norm H W)
         output = torch.mm(norm_adj, features)
         output = self.linear(output)
         return self.activation(output)
+    
 class GINLayer(nn.Module):
     def __init__(self, in_dim, out_dim, epsilon=0.1):
         super(GINLayer, self).__init__()
@@ -739,7 +477,6 @@ class GINLayer(nn.Module):
         )
 
     def forward(self, adj, features):
-        # Create a sparse identity matrix
         identity = torch.sparse_coo_tensor(
             indices=torch.arange(adj.shape[0]).repeat(2, 1),
             values=torch.ones(adj.shape[0], device=adj.device),
@@ -747,22 +484,64 @@ class GINLayer(nn.Module):
             device=adj.device
         )
 
-        # Add sparse self-loops to adjacency matrix
         adj = adj + identity
-
-        # Convert sparse to dense for further processing
         adj = adj.to_dense()
 
-        # Neighbor aggregation
         row_sum = torch.sum(adj, dim=1)
         d_inv = torch.pow(row_sum, -1)
-        d_inv[torch.isinf(d_inv)] = 0.0  # Handle division by zero
+        d_inv[torch.isinf(d_inv)] = 0.0  
         d_mat_inv = torch.diag(d_inv)
         agg_neighbors = torch.mm(d_mat_inv, torch.mm(adj, features))
 
-        # Apply the GIN formula
         out = (1 + self.epsilon) * features + agg_neighbors
         return self.mlp(out)
+
+class GATLayer(nn.Module):
+    def __init__(self, in_dim, out_dim, heads=1, dropout=0.1):
+        super(GATLayer, self).__init__()
+        self.heads = heads
+        self.out_dim = out_dim
+        self.attention_heads = nn.ModuleList([
+            nn.Linear(2 * in_dim, 1) for _ in range(heads)
+        ])
+        self.linear = nn.Linear(in_dim, out_dim * heads)
+        self.dropout = nn.Dropout(dropout)
+        self.activation = nn.ELU()
+
+    def forward(self, adj, features):
+        identity = torch.sparse_coo_tensor(
+            indices=torch.stack([torch.arange(adj.shape[0], device=adj.device),
+                                 torch.arange(adj.shape[0], device=adj.device)]),
+            values=torch.ones(adj.shape[0], device=adj.device),
+            size=(adj.shape[0], adj.shape[0]),
+            device=adj.device
+        )
+        adj = adj + identity
+
+        adj_dense = adj.to_dense()
+
+        N = features.shape[0]
+        attention_scores = []
+        for head in self.attention_heads:
+            expanded_features = features.unsqueeze(1).repeat(1, N, 1)
+            concatenated_features = torch.cat(
+                [expanded_features, features.unsqueeze(0).repeat(N, 1, 1)],
+                dim=-1
+            )
+            attention_score = torch.exp(head(concatenated_features).squeeze(-1))
+            attention_scores.append(attention_score)
+        attention_scores = torch.stack(attention_scores, dim=1)  
+        attention_scores = attention_scores * adj_dense.unsqueeze(1)  
+        attention_scores = attention_scores / (
+            attention_scores.sum(dim=-1, keepdim=True) + 1e-10
+        )
+        attention_scores = self.dropout(attention_scores)
+
+        feature_transformed = self.linear(features)
+        feature_transformed = feature_transformed.view(N, self.heads, self.out_dim) 
+        attention_output = torch.einsum("nhi,nij->nhj", attention_scores, feature_transformed)
+
+        return self.activation(attention_output.view(N, -1)) 
 
 
 class GaussianDiffusionModel(nn.Module):
@@ -770,21 +549,20 @@ class GaussianDiffusionModel(nn.Module):
         super(GaussianDiffusionModel, self).__init__()
         self.num_steps = num_steps
 
-        # Update the input size of the encoder to match concatenated embeddings
-        self.encoder = nn.Linear(latdim * 3, latdim)  # Input size = 192, Output size = 64
-        self.decoder = nn.Linear(latdim, latdim * 3)  # Match the size of x_t (192)
+        self.encoder = nn.Linear(latdim * 3, latdim)  
+        self.decoder = nn.Linear(latdim, latdim * 3)  
 
         self.beta_schedule = torch.linspace(0.0001, 0.02, steps=num_steps).to(args.device)
 
     def forward_diffusion(self, x, t):
         noise = torch.randn_like(x)
-        alpha_t = torch.prod(1 - self.beta_schedule[:t + 1])  # Scalar
+        alpha_t = torch.prod(1 - self.beta_schedule[:t + 1]) 
         noisy_x = torch.sqrt(alpha_t) * x + torch.sqrt(1 - alpha_t) * noise
         return noisy_x
 
     def reverse_diffusion(self, x_t, t):
-        latent = F.relu(self.encoder(x_t))  # Now accepts 192 as input
-        denoised = self.decoder(latent)  # Output size matches 192
+        latent = F.relu(self.encoder(x_t)) 
+        denoised = self.decoder(latent) 
         beta_t = self.beta_schedule[t]
         mean = (1 / torch.sqrt(1 - beta_t)) * (x_t - beta_t / torch.sqrt(1 - beta_t) * denoised)
         return mean
@@ -794,8 +572,24 @@ class GaussianDiffusionModel(nn.Module):
             x = self.forward_diffusion(x, t)
         for t in reversed(range(self.num_steps)):
             x = self.reverse_diffusion(x, t)
-        return torch.sigmoid(x)  # Ensure output is in [0, 1]
+        return torch.sigmoid(x) 
 
+
+
+# -------------------------
+# Layer Getter
+# -------------------------
+
+def get_gnn_layer(gnn_type, in_dim, out_dim, heads=1):
+    if gnn_type == "GCN":
+        return GCNLayer(in_dim, out_dim)
+    elif gnn_type == "GAT":
+        return GATLayer(in_dim, out_dim, heads=heads)
+    elif gnn_type == "GIN":
+        return GINLayer(in_dim, out_dim)
+    else:
+        raise ValueError(f"Unsupported GNN type: {gnn_type}")
+    
 # -------------------------
 # Main Function
 # -------------------------
